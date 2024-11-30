@@ -1,16 +1,20 @@
 #!/bin/bash
 
-# autoAR Logo
-printf "==============================\n"
-printf "  
+# Set PATH to prioritize Go binaries
+export PATH="/go/bin:$PATH"
 
-              _          _    ____  
-   __ _ _   _| |_ ___   / \  |  _ \ 
-  / _` | | | | __/ _ \ / _ \ | |_) |
- | (_| | |_| | || (_) / ___ \|  _ < 
-  \__,_|\__,_|\__\___/_/   \_\_| \_\
-                                    
-==============================\n"
+# autoAR Logo
+printf "\033[1;34m==============================\n"
+printf "
+     █████╗ ██╗   ██╗████████╗ ██████╗  █████╗ ██████╗ 
+    ██╔══██╗██║   ██║╚══██╔══╝██╔═══██╗██╔══██╗██╔══██╗
+    ███████║██║   ██║   ██║   ██║   ██║███████║██████╔╝
+    ██╔══██║██║   ██║   ██║   ██║   ██║██╔══██║██╔══██╗
+    ██║  ██║╚██████╔╝   ██║   ╚██████╔╝██║  ██║██║  ██║
+    ╚═╝  ╚═╝ ╚═════╝    ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝
+                                     By: h0tak88r
+"
+printf "==============================\033[0m\n\n"
 
 # Constants
 RESULTS_DIR="results"
@@ -41,7 +45,7 @@ Options:
     -o DIR          Output directory (default: results)
     -t DIR          ParamX templates directory (default: paramx-templates)
     -v              Verbose output
-    --skip-ports    Skip port scanning
+pw  Skip port scanning
     --skip-fuzz     Skip fuzzing
     --skip-sqli     Skip SQL injection scanning
     --skip-paramx   Skip ParamX scanning
@@ -123,6 +127,82 @@ send_file_to_discord() {
     fi
 }
 
+# Function to install Go tools
+install_go_tool() {
+    local tool="$1"
+    local install_cmd="$2"
+    
+    if ! command -v "$tool" &> /dev/null; then
+        log "Installing $tool..."
+        eval "$install_cmd"
+        if ! command -v "$tool" &> /dev/null; then
+            log "Error: Failed to install $tool"
+            return 1
+        fi
+        log "Successfully installed $tool"
+    fi
+    return 0
+}
+
+# Function to check if required tools are installed
+check_tools() {
+    local missing_tools=()
+    local install_failed=0
+    
+    # Install Go tools
+    install_go_tool "urlfinder" "go install -v github.com/projectdiscovery/urlfinder/cmd/urlfinder@latest" || install_failed=1
+    install_go_tool "httpx" "go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest" || install_failed=1
+    install_go_tool "subfinder" "go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest" || install_failed=1
+    install_go_tool "nuclei" "go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest" || install_failed=1
+    install_go_tool "naabu" "go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest" || install_failed=1
+    install_go_tool "paramx" "go install -v github.com/cyinnove/paramx/cmd/paramx@latest" || install_failed=1
+    
+    # Check Python tools
+    if ! command -v pip &> /dev/null; then
+        log "Installing pip..."
+        sudo apt-get update && sudo apt-get install -y python3-pip || install_failed=1
+    fi
+
+    
+    # Check if any installations failed
+    if [[ $install_failed -eq 1 ]]; then
+        log "Error: Some tools failed to install. Please check the logs."
+        return 1
+    fi
+    
+    # Verify all required tools are installed
+    local tools=("urlfinder" "httpx" "subfinder" "nuclei" "naabu" "paramx")
+    for tool in "${tools[@]}"; do
+        if ! command -v "$tool" &> /dev/null; then
+            missing_tools+=("$tool")
+        fi
+    done
+    
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        log "Error: Missing required tools: ${missing_tools[*]}"
+        return 1
+    fi
+    
+    log "All required tools are installed"
+    return 0
+}
+
+# Function to check if file exists and is not empty
+check_file() {
+    local file="$1"
+    local msg="$2"
+    if [[ ! -f "$file" ]]; then
+        log "Error: Required file not found: $file"
+        [[ -n "$msg" ]] && log "$msg"
+        return 1
+    elif [[ ! -s "$file" ]]; then
+        log "Warning: File is empty: $file"
+        [[ -n "$msg" ]] && log "$msg"
+        return 2
+    fi
+    return 0
+}
+
 # Function to check and clone repositories if they do not exist
 check_and_clone() {
     local dir="$1"
@@ -135,48 +215,28 @@ check_and_clone() {
     fi
 }
 
-# Function to check if required tools are installed
-check_tools() {
-    local tools=("subfinder" "httpx" "waymore" "subov88r" "nuclei" "naabu" "kxss" "qsreplace" "paramx" "dalfox" "ffuf" "interlace" "urldedupe")
-    for tool in "${tools[@]}"; do
-        if ! command -v "$tool" &> /dev/null; then
-            log "Error: $tool is not installed."
-            if [[ "$tool" == "paramx" ]]; then
-                log "To install paramx, run: go install github.com/cyinnove/paramx/cmd/paramx@latest"
-            fi
-            exit 1
-        fi
-    done
-}
-
 # Function to setup results directory for a domain
 setup_domain_dir() {
     local domain="$1"
     local domain_dir="$RESULTS_DIR/$domain"
     
-    # Create directory structure
+    # Create directory structure with proper permissions
     mkdir -p "$domain_dir"/{subs,urls,vulnerabilities/{xss,sqli,ssrf,ssti,lfi,rce,idor},fuzzing,ports}
+    
+    # Create necessary files to avoid "file not found" errors
+    touch "$domain_dir/urls/live.txt"
+    touch "$domain_dir/vulnerabilities/put-scan.txt"
+    touch "$domain_dir/vulnerabilities/nuclei_templates-results.txt"
+    touch "$domain_dir/vulnerabilities/nuclei-templates-results.txt"
+    
+    # Set proper permissions
+    chmod -R 755 "$domain_dir"
     
     # Return the domain directory path
     echo "$domain_dir"
 }
 
-# Function to remove and create results directory
-setup_results_dir() {
-    # Create results directory if it doesn't exist
-    mkdir -p "$RESULTS_DIR"
-    
-    # If a domain is specified, clean only that domain's directory
-    if [[ -n "$TARGET" ]]; then
-        local domain_dir=$(setup_domain_dir "$TARGET")
-        if [[ -d "$domain_dir" ]]; then
-            log "[+] Cleaning previous results for domain $TARGET"
-            rm -rf "$domain_dir"
-        fi
-    fi
-}
-
-# Function to check and setup paramx templates
+# Function to setup ParamX templates
 setup_paramx_templates() {
     # Check if templates directory exists
     if [[ ! -d "$PARAMX_TEMPLATES" ]]; then
@@ -241,13 +301,13 @@ fetch_urls() {
     if [[ -n "$VERBOSE" ]]; then
         urlfinder -d "$target" -all -s alienvault,commoncrawl,waybackarchive,urlscan -v -o "$domain_dir/urls/all-urls.txt"
     else
-        urlfinder -d "$target" -all -s alienvault,commoncrawl,waybackarchive,urlscan -silent -o "$domain_dir/urls/all-urls.txt"
+        urlfinder -d "$target" -all -stats -s alienvault,commoncrawl,waybackarchive,urlscan -silent -o "$domain_dir/urls/all-urls.txt"
     fi
     
     # Check if we found any URLs
     if [[ -f "$domain_dir/urls/all-urls.txt" && -s "$domain_dir/urls/all-urls.txt" ]]; then
         # Filter live URLs
-        cat "$domain_dir/urls/all-urls.txt" | httpx -silent -mc 200,201,301,302,403 -o "$domain_dir/urls/live.txt"
+        cat "$domain_dir/urls/all-urls.txt" | httpx -silent -o "$domain_dir/urls/live.txt"
         
         # Count URLs
         local total_urls=$(wc -l < "$domain_dir/urls/all-urls.txt")
@@ -266,8 +326,34 @@ fetch_urls() {
 filter_live_hosts() {
     local domain_dir="$1"
     log "[+] Filtering live hosts"
-    cat "$domain_dir/subs/all-subs.txt" | httpx -silent -o "$domain_dir/urls/live.txt"
-    send_file_to_discord "$domain_dir/urls/live.txt" "Live Hosts"
+    
+    # Verify httpx installation
+    if ! command -v httpx &> /dev/null; then
+        log "Installing httpx..."
+        go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+        if ! command -v httpx &> /dev/null; then
+            log "Error: Failed to install httpx. Please install manually."
+            return 1
+        fi
+    fi
+    
+    # Create output file
+    mkdir -p "$(dirname "$domain_dir/urls/live.txt")"
+    touch "$domain_dir/urls/live.txt"
+    
+    if [[ -f "$domain_dir/subs/all-subs.txt" ]]; then
+        log "Running httpx on subdomains..."
+        cat "$domain_dir/subs/all-subs.txt" | httpx -silent -o "$domain_dir/urls/live.txt"
+        if [[ -s "$domain_dir/urls/live.txt" ]]; then
+            log "Found $(wc -l < "$domain_dir/urls/live.txt") live hosts"
+            send_file_to_discord "$domain_dir/urls/live.txt" "Live Hosts"
+        else
+            log "Warning: No live hosts found"
+        fi
+    else
+        log "Error: Subdomain file not found: $domain_dir/subs/all-subs.txt"
+        return 1
+    fi
 }
 
 # Function to run port scanning
@@ -527,6 +613,47 @@ run_nuclei_scans() {
     fi
     send_file_to_discord "$domain_dir/vulnerabilities/nuclei_templates-results.txt" "Collected Templates Nuclei Scans Results"
     send_file_to_discord "$domain_dir/vulnerabilities/nuclei-templates-results.txt" "Public Nuclei Scans Results"
+}
+
+# Function to remove and create results directory
+setup_results_dir() {
+    # Create results directory if it doesn't exist
+    mkdir -p "$RESULTS_DIR"
+    
+    # If a domain is specified, clean only that domain's directory
+    if [[ -n "$TARGET" ]]; then
+        local domain_dir=$(setup_domain_dir "$TARGET")
+        if [[ -d "$domain_dir" ]]; then
+            log "[+] Cleaning previous results for domain $TARGET"
+            rm -rf "$domain_dir"
+        fi
+    fi
+}
+
+# Function to setup ParamX templates
+setup_paramx_templates() {
+    # Check if templates directory exists
+    if [[ ! -d "$PARAMX_TEMPLATES" ]]; then
+        log "[+] Creating ParamX templates directory"
+        mkdir -p "$PARAMX_TEMPLATES"
+        
+        # Clone default templates if directory is empty
+        if [[ -z "$(ls -A "$PARAMX_TEMPLATES")" ]]; then
+            log "[+] Cloning default ParamX templates"
+            git clone https://github.com/cyinnove/paramx-templates.git tmp_templates
+            cp -r tmp_templates/* "$PARAMX_TEMPLATES/"
+            rm -rf tmp_templates
+        fi
+    fi
+    
+    # Verify templates exist
+    if [[ -z "$(ls -A "$PARAMX_TEMPLATES")" ]]; then
+        log "Error: No ParamX templates found in $PARAMX_TEMPLATES"
+        log "Please add your templates to this directory or use -t to specify a different directory"
+        exit 1
+    fi
+    
+    log "[+] Using ParamX templates from: $PARAMX_TEMPLATES"
 }
 
 # Main function

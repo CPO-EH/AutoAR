@@ -110,7 +110,7 @@ check_and_install_tools() {
     install_naabu
     install_massdns
     install_nuclei_templates
-    install_python_tool "waymore" "sudo pip install waymore"
+    install_python_tool "waymore" "pip install waymore"
     if ! command -v interlace &> /dev/null; then
         print_msg red "interlace - not installed"
         print_msg yellow "Attempting to install interlace"
@@ -123,9 +123,51 @@ check_and_install_tools() {
     fi
 }
 
+# Function to install GUI dependencies
+install_gui_dependencies() {
+    print_msg blue "Installing GUI dependencies..."
+    
+    # Install Python and pip if not present
+    if ! command -v python3 &> /dev/null; then
+        sudo apt-get install -y python3
+    fi
+    if ! command -v pip3 &> /dev/null; then
+        sudo apt-get install -y python3-pip
+    fi
+
+    # Install GUI-related packages
+    pip3 install --upgrade pip
+    pip3 install PyQt5 customtkinter
+    
+    print_msg green "GUI dependencies installed successfully"
+}
+
 # Main setup function
 setup() {
+    # Create necessary directories
+    mkdir -p Wordlists nuclei_templates
+
+    # Install basic dependencies
+    sudo apt-get update
+    sudo apt-get install -y git golang python3 python3-pip libpcap-dev
+
+    # Install Go if not present
+    if ! command -v go &> /dev/null; then
+        print_msg yellow "Installing Go..."
+        wget https://go.dev/dl/go1.21.0.linux-amd64.tar.gz
+        sudo rm -rf /usr/local/go
+        sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz
+        rm go1.21.0.linux-amd64.tar.gz
+        echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+        echo 'export PATH=$PATH:~/go/bin' >> ~/.bashrc
+        source ~/.bashrc
+    fi
+
+    # Install tools
     check_and_install_tools
+    
+    # Install GUI dependencies
+    install_gui_dependencies
 }
 
 # Run the setup

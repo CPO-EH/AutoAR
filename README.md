@@ -68,7 +68,7 @@ AutoAR depends on the following tools:
 | httpx | HTTP toolkit |
 | naabu | Port scanning |
 | nuclei | Vulnerability scanner |
-| ffuf | Web fuzzer |
+| [ffuf](https://github.com/cyinnove/ffuf) | Web fuzzer |
 | kxss | XSS detection |
 | qsreplace | Query replacement |
 | paramx | Parameter discovery |
